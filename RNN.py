@@ -3,29 +3,22 @@ import torch.nn as nn
 import torch.optim as optim
 
 
-# according to the world models paper appendix
-Z_i = 1024
-ACTION_DIM = 3
-HIDDEN_UNITS = 256
-GAUSSIAN_MIXTURES = 5
-BATCH_SIZE = 32
-EPOCHS = 20
-# TEMPERATURE = 1.1
 
 class RNN(nn.Module):
     """ MULTI STEPS forward.
         input: aggregated vector of latents(Z_i + actions)
         """
-    def __init__(self):
+    def __init__(self, vae_latent_size, hidden_units, action_dim, gaussian_mixtures):
         super(RNN, self).__init__()
-        self.rnn = nn.LSTM(input_size=Z_i + ACTION_DIM, hidden_size=HIDDEN_UNITS)
-        self.fc = nn.Linear(HIDDEN_UNITS, GAUSSIAN_MIXTURES * (3 * Z_i))
+        self.hidden_units = hidden_units
+        self.rnn = nn.LSTM(input_size=vae_latent_size + action_dim, hidden_size=hidden_units)
+        self.fc = nn.Linear(hidden_units, gaussian_mixtures * (3 * vae_latent_size))
 
     def forward(self, x, h=None, c=None):
         if h is None:
-            h = torch.zeros(1, HIDDEN_UNITS)
+            h = torch.zeros(1, self.hidden_units)
         if c is None:
-            c = torch.zeros(1, HIDDEN_UNITS)
+            c = torch.zeros(1, self.hidden_units)
         lstm_out, (h, c) = self.rnn(x, (h, c))
         pi, mu, sigma = self.mixture_density_network(lstm_out)
         return (pi, mu, sigma), (h, c)
@@ -44,11 +37,11 @@ class RNN(nn.Module):
         # mu can be anything
         return pi, mu, sigma
 
-def MDN_RNN_loss(y_true, pi, mu, sigma):
+def MDN_RNN_loss(y_true, pi, mu, sigma, gaussian_mixtures, latent_size):
     # Reshape mean and std tensors
-    mu = mu.view(-1, GAUSSIAN_MIXTURES, Z_i)
-    sigma = sigma.view(-1, GAUSSIAN_MIXTURES, Z_i)
-    pi = pi.view(-1, GAUSSIAN_MIXTURES, Z_i)
+    mu = mu.view(-1, gaussian_mixtures, latent_size)
+    sigma = sigma.view(-1, gaussian_mixtures, latent_size)
+    pi = pi.view(-1, gaussian_mixtures, latent_size)
 
     # Ensure y_true has the correct shape
     y_true = y_true.unsqueeze(1).expand_as(mu)
@@ -60,42 +53,32 @@ def MDN_RNN_loss(y_true, pi, mu, sigma):
     weighted_probs = dist.log_prob(y_true) + pi.log()
     loss = -torch.logsumexp(weighted_probs, dim=1).mean()  # corrected line
     return loss
-def main():
-    start_batch = 0
-    max_batch = 100
-    new_model = True
-    batch_size = 200
-    rnn = RNN()
+
+
+# according to the world models paper appendix
+def main(latent_size=32, action_dim=3, hidden_units=256, gaussian_mixtures=5, batch_size=500, epochs=20, rnn_weights_path='./models/rnn_weights.pth', rnn_input_data_path='./data/rnn_input.pth', rnn_output_data_path='./data/rnn_output.pth'):
+    rnn = RNN(latent_size, hidden_units, action_dim, gaussian_mixtures)
     optimizer = optim.RMSprop(rnn.parameters())
 
-    # if not new_model:
-    #     try:
-    #         rnn.set_weights('./rnn/weights.h5')
-    #     except:
-    #         print("Either set --new_model or ensure ./rnn/weights.h5 exists")
-    #         raise
-
-    train_rnn_input = torch.load('./data/rnn_input.pth')
-    train_rnn_output = torch.load('./data/rnn_output.pth')
+    train_rnn_input = torch.load(rnn_input_data_path)
+    train_rnn_output = torch.load(rnn_output_data_path)
 
 
-    for epoch in range(EPOCHS):
-        for i in range(0, 60000, batch_size):
-            print(f'batch {i}')
+    for epoch in range(epochs):
+        for i in range(0, len(train_rnn_output), batch_size):
             x = train_rnn_input[i:i+batch_size]
             y = train_rnn_output[i:i+batch_size]
             rnn.train()
             optimizer.zero_grad()
             rnn_output, _ = rnn(x)
-            loss = MDN_RNN_loss(y, *rnn_output)
+            loss = MDN_RNN_loss(y, *rnn_output, gaussian_mixtures, latent_size)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(rnn.parameters(), max_norm=1.0)
             optimizer.step()
-        # vae.decoder(rnn.)
-        print(f'Epoch {epoch + 1}/{EPOCHS}, Loss: {loss.item():.4f}')
+        print(f'Epoch {epoch + 1}/{epochs}, Loss: {loss.item():.4f}')
 
     # Save model weights
-    torch.save(rnn.state_dict(), './models/rnn_weights.pth')
+    torch.save(rnn.state_dict(), rnn_weights_path)
 
 if __name__ == "__main__":
     main()

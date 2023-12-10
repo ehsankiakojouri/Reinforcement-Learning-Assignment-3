@@ -1,6 +1,6 @@
-numpy
-scipy
-gymnasium
-gymnasium[box2d]
-scikit-learn
-torch
+cma==2.5.3
+gymnasium==0.28.1
+matplotlib==2.2.2
+numpy==1.21.6
+opencv_python==4.8.1.78
+torch==1.13.1

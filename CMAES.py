@@ -1,4 +1,3 @@
-import concurrent.futures
 import cv2
 import cma
 import gymnasium as gym
@@ -24,9 +23,10 @@ def unflatten_parameters(params, example, device):
         unflattened += [params[idx:idx + e_p.numel()].view(e_p.size())]
         idx += e_p.numel()
     return unflattened
+
 class RolloutGenerator(object):
     ''' Generate a single rollout '''
-    def __init__(self, v_path, m_path, render=False, device=None):
+    def __init__(self, vae_latent_size, rnn_hidden_units, action_dim, gaussian_mixtures, v_path, m_path, render=False, device=None):
         ''' Initialize a RolloutGenerator object.
 
         Parameters
@@ -38,15 +38,19 @@ class RolloutGenerator(object):
         device : Optional[str]
             The device to onto which to push tensors, or None to use CUDA where available.
         '''
-        self.vae = VAE().to(device)
+        self.gaussian_mixtures = gaussian_mixtures
+        self.action_dim = action_dim
+        self.vae_latent_size = vae_latent_size
+        self.rnn_hidden_units = rnn_hidden_units
+        self.vae = VAE(vae_latent_size).to(device)
         checkpoint_v = torch.load(v_path)
         self.vae.load_state_dict(checkpoint_v)
 
-        self.mdnrnn = RNN().to(device)
+        self.mdnrnn = RNN(vae_latent_size, self.rnn_hidden_units, self.action_dim, self.gaussian_mixtures).to(device)
         checkpoint_m = torch.load(m_path)
         self.mdnrnn.load_state_dict(checkpoint_m)
 
-        self.control = CONTROLLER().to(device)
+        self.control = CONTROLLER(self.rnn_hidden_units, self.vae_latent_size, self.action_dim).to(device)
         render_mode = 'human' if render else 'rgb_array'
         self.env = gym.make('CarRacing-v2', render_mode=render_mode)
         self.device = device if device else 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -66,38 +70,31 @@ class RolloutGenerator(object):
         '''
         x = cv2.resize(obs, dsize=(64, 64), interpolation=cv2.INTER_NEAREST)
         x = x.astype('float32') / 255
-        x = x.transpose((2, 0, 1))
+        x = x.T
         x = torch.from_numpy(x).view(-1, 3, 64, 64)
         return x
 
-    def rollout(self, params, num_episodes=1000):
-        ''' Perform a single rollout.
+    def rollout(self, params, time_steps=1000):
+        # Perform a single rollout.
+        # time_steps should a fixed number = 1000, however, due to limited computational horsepower
+        # we use 300 episodes for CMAES algorithms and 1000 episode for saving the best model
 
-        Parameters
-        ----------
-        params : dict
-            controller fully connected layer weights and biases
-        Returns
-        -------
-        total_reward * -1 : float
-            The negative reward accumulated during the rollout
-        '''
-        load_parameters(params, self.control)
+        load_parameters(params, self.control, )
 
-        obs = self.env.reset()[0]
+        obs, _ = self.env.reset()
         self.env.render()
-        (h, c) = [torch.zeros(1, 1, 256).to(self.device) for _ in range(2)]
+        (h, c) = [torch.zeros(1, 1, self.rnn_hidden_units).to(self.device) for _ in range(2)]
         total_reward = 0
 
-        for step in range(num_episodes):
+        for step in range(time_steps):
             obs = self.pre_process(obs).to(self.device)
             # using mean as z vector
-            z = self.vae.encoder(obs)
+            _, z, _, _ = self.vae(obs)
             a = self.control.get_action(z, h)
             obs, reward, terminated, truncated, _ = self.env.step(a)
 
-            a = torch.from_numpy(a).view(1, 1, 3).to(self.device)
-            x = torch.cat((z.view(1, 1, 1024), a), 2)
+            a = torch.from_numpy(a).view(1, 1, self.action_dim).to(self.device)
+            x = torch.cat((z.view(1, 1, self.vae_latent_size), a), 2)
             _, (h, c) = self.mdnrnn.rnn(x, (h, c))
 
             total_reward += reward
@@ -105,36 +102,39 @@ class RolloutGenerator(object):
                 break
         return -1 * total_reward
 
-def fitness(rolloutGenerator, solutions, n_rollouts, num_episodes):
+
+def individual_fitness(rolloutGenerator, solution, n_rollouts, time_steps):
+    avg_cumulated_rewards = 0
+    for i in range(n_rollouts):
+        avg_cumulated_rewards += rolloutGenerator.rollout(solution, time_steps) / n_rollouts
+    return avg_cumulated_rewards
+
+
+def fitness(rolloutGenerator, solutions, n_rollouts, time_steps):
     rewards = [0] * len(solutions)
     for idx, solution in enumerate(solutions):  # loss calculation
         # load params into controller
-        avg_cumulated_rewards = 0
-        for i in range(n_rollouts):
-            avg_cumulated_rewards += rolloutGenerator.rollout(solution, num_episodes) / n_rollouts
-        rewards[idx] = avg_cumulated_rewards
+        rewards[idx] = individual_fitness(rolloutGenerator, solution, n_rollouts, time_steps)
     return rewards
 
-
 def main():
-    v_path = 'models/obs_data_car_racing.VAE_model'
+    v_path = 'models/VAE_weights.pth'
     m_path = './models/rnn_weights.pth'
-    c_save_path = 'models/cmaes_train_controller.pth'
-    num_workers = 6 # number of CPU cores
+    c_save_path = './models/cmaes_train_controller.pth'
 
-
-    obs_index = 2
+    vae_latent_size = 32
     population_each_rollout_episodes = 300
     best_each_rollout_episodes = 1000
     interval_rollouts = 1024
     n_rollouts = 16
     pop_size = 64
     target = 930
-    log_interval = 1
-    weight_save_interval = 5
     sigma = 0.1
+    rnn_hidden_units = 256
+    action_dim = 3
+    gaussian_mixtures = 5
     # dummy controller to initialize parameters
-    controller = CONTROLLER()
+    controller = CONTROLLER(rnn_hidden_units, vae_latent_size, action_dim)
     cur_best = None
     generation= 0
     eval_best_interval = 25 # according to the paper
@@ -143,33 +143,29 @@ def main():
     flatten_parameters = torch.cat([p.detach().view(-1) for p in parameters], dim=0).numpy()
     es = cma.CMAEvolutionStrategy(flatten_parameters, sigma, {'popsize': pop_size})
 
-    human_r_gen = RolloutGenerator(v_path, m_path, render=True)
-    r_gen = RolloutGenerator(v_path, m_path, render=False)
+    human_r_gen = RolloutGenerator(vae_latent_size, rnn_hidden_units, action_dim, gaussian_mixtures, v_path, m_path,
+                                   render=True)
+    r_gen = RolloutGenerator(vae_latent_size, rnn_hidden_units, action_dim, gaussian_mixtures, v_path, m_path, render=False)
     while not es.stop():
         generation += 1
         print(f"Iterat #Fevals   function value  axis ratio  sigma  min&max std  t[m:s] -- generation: {generation} -- cur_best: {cur_best}")
         if cur_best is not None and (-cur_best) > target:
             print("Already better than target, breaking...")
             break
-
-        r_list = [0] * pop_size
         solutions = es.ask()
         with torch.no_grad():
             r_list = fitness(r_gen, solutions, n_rollouts, population_each_rollout_episodes)
 
         es.tell(solutions, r_list)
         es.disp()
-        best_solution = es.result.xbest
-        best = es.result.fbest
-        best_std = es.result.xbest.std
         if generation> 0 and generation%eval_best_interval == 0:
             with torch.no_grad():
-                r_list = fitness(human_r_gen, best_solution, interval_rollouts, best_each_rollout_episodes)
+                best = individual_fitness(human_r_gen, es.result.xbest, interval_rollouts, best_each_rollout_episodes)
             # best comparrison is > because working with negative of rewards
             if not cur_best or cur_best > best:
                 cur_best = best
-                print(f"Saving new best with value {-cur_best}±{best_std}...")
-                load_parameters(best_solution, controller)
+                print(f"Saving new best with value {-cur_best}±{es.result.xbest.std}...")
+                load_parameters(es.result.xbest, controller)
                 torch.save({'generation': generation,
                             'reward': -cur_best,
                             'state_dict': controller.state_dict()},
