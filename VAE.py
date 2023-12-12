@@ -51,6 +51,7 @@ class VAE(nn.Module):
 
     def forward(self, x):
         # Encode
+        x = x.to(self.device)
         x = self.encoder(x)
         z_mean = self.z_mean(x)
         z_log_var = self.z_log_var(x)
