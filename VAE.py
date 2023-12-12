@@ -5,11 +5,13 @@ import torch.optim as optim
 from matplotlib import pyplot as plt
 from torch.autograd import Variable
 
+
 class Sampling(nn.Module):
     def forward(self, args):
         z_mean, z_log_var = args
         epsilon = torch.randn_like(z_mean)
         return z_mean + torch.exp(z_log_var / 2) * epsilon
+
 
 class VAE(nn.Module):
     def __init__(self, latent_size):
@@ -58,24 +60,27 @@ class VAE(nn.Module):
 
 
 # Loss functions
-def vae_r_loss(y_true, y_pred): # regularization
+def vae_r_loss(y_true, y_pred):  # regularization
     return 10 * torch.mean((y_true.view(-1) - y_pred.view(-1)) ** 2)
 
-def vae_kl_loss(z_mean, z_log_var): # K-L loss
+
+def vae_kl_loss(z_mean, z_log_var):  # K-L loss
     return -0.5 * torch.mean(1 + z_log_var - z_mean.pow(2) - torch.exp(z_log_var))
+
 
 def vae_loss(y_true, y_pred, z_mean, z_log_var):
     return vae_r_loss(y_true, y_pred) + vae_kl_loss(z_mean, z_log_var)
+
 
 # Training loop
 def train(vae, optimizer, data, epochs, batch_size, validation_split=0.2):
     data_size = len(data)
     split_index = int(data_size * (1 - validation_split))
-    for epoch in range(1, epochs+1):
+    for epoch in range(1, epochs + 1):
         vae.train()
         for i in range(0, split_index, batch_size):
             print(f'batch size {batch_size} starting at: {i}')
-            batch_data = data[i:i+batch_size]
+            batch_data = data[i:i + batch_size]
             batch_data = Variable(batch_data)
 
             optimizer.zero_grad()
@@ -90,25 +95,38 @@ def train(vae, optimizer, data, epochs, batch_size, validation_split=0.2):
         val_loss = vae_loss(val_data, val_recon, val_z_mean, val_z_log_var)
 
         print(f'Epoch {epoch}/{epochs}, Loss: {loss.item():.4f}, Val Loss: {val_loss.item():.4f}')
-        if epoch%5 == 0:
-            ax1 = plt.subplot(2, 2, 1)
-            ax1.imshow(val_recon[-1].detach().numpy().T)
-            ax2 = plt.subplot(2, 2, 2)
-            ax2.imshow(val_data[-1].detach().numpy().T)
+        if epoch % 5 == 0:
+            ax1 = plt.subplot(1, 2, 1)
+            ax1.imshow(val_recon[-1].detach().numpy().transpose((1, 2, 0)))
+            ax2 = plt.subplot(1, 2, 2)
+            ax2.imshow(val_data[-1].detach().numpy().transpose((1, 2, 0)))
             plt.show()
     return vae
 
-def main(latent_size=32, epochs=10, batch_size=32, validation_split=0.2, data_path='./data/obs_data_car_racing.pth', vae_weights_path='models/VAE_weights.pth'):
+
+def main(latent_size, epochs, batch_size, validation_split, data_path, vae_weights_path):
     data = torch.load(data_path)
     random_index = random.randint(0, len(data) - 1)
-    plt.imshow(data[random_index].detach().numpy().T)
+    plt.imshow(data[random_index].detach().numpy().transpose((1, 2, 0)))
     plt.title(f"random image: #{random_index}")
     plt.xlabel(f"dataset shape: {data.shape}")
+    plt.savefig('myplot')
     plt.show()
     vae = VAE(latent_size)
     optimizer = optim.Adam(vae.parameters())
     vae = train(vae, optimizer, data, epochs, batch_size, validation_split)
     torch.save(vae.state_dict(), vae_weights_path)
 
+# parameters
+v_path = 'models/VAE_weights.pth'
+obs_data_path = './data/obs_data_car_racing.pth'
+vae_latent_size = 32
+vae_batch_size = 32
+vae_epochs = 10
+
+
 if __name__ == "__main__":
-    main()
+    main(latent_size=vae_latent_size, epochs=vae_epochs, batch_size=vae_batch_size, validation_split=0.2,
+         # validation_split is for printing loss for VAE during training
+         data_path=obs_data_path,
+         vae_weights_path=v_path)

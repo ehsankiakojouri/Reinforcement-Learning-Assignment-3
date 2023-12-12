@@ -19,7 +19,7 @@ def evaluate(env=None, n_episodes=1, render=False):
         s, _ = env.reset()
         while not done:
             action = agent.act(s)
-
+            
             s, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             total_reward += reward

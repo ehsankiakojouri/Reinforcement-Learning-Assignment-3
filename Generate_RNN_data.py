@@ -1,10 +1,11 @@
 import torch
 from VAE import VAE
 
-def main(vae_latent_shape=32, batch_size=500, vae_weights_path='models/VAE_weights.pth', action_data_path='./data/action_data_car_racing.pth', obs_data_path='./data/obs_data_car_racing.pth', rnn_input_data_path='./data/rnn_input.pth', rnn_output_data_path='./data/rnn_output.pth'):
 
+def main(vae_latent_shape, batch_size, vae_weights_path, action_data_path, obs_data_path, rnn_input_data_path,
+         rnn_output_data_path):
     vae = VAE(vae_latent_shape)
-    vae.load_state_dict(torch.load(vae_weights_path), strict= False)
+    vae.load_state_dict(torch.load(vae_weights_path), strict=False)
     obs_data = torch.load(obs_data_path)
     action_data = torch.load(action_data_path)
 
@@ -15,15 +16,14 @@ def main(vae_latent_shape=32, batch_size=500, vae_weights_path='models/VAE_weigh
     rnn_input = torch.zeros((NO_samples, vae_latent_shape + action_shape[0]))
     rnn_output = torch.zeros((NO_samples, vae_latent_shape))
 
-
     for i in range(0, obs_data.shape[0], batch_size):
         print('batch:', i)
-        batch_action_data = action_data[i:i+batch_size]
-        batch_obs_data = obs_data[i:i+batch_size]
+        batch_action_data = action_data[i:i + batch_size]
+        batch_obs_data = obs_data[i:i + batch_size]
         _, rnn_z_input, _, _ = vae(batch_obs_data)
-        aggregate_z_action = torch.cat([rnn_z_input, batch_action_data], dim=1) # aggregate z and action
-        rnn_input[i : i+batch_size] = aggregate_z_action # input = z_i + action
-        rnn_output[i : i+batch_size] = rnn_z_input
+        aggregate_z_action = torch.cat([rnn_z_input, batch_action_data], dim=1)  # aggregate z and action
+        rnn_input[i: i + batch_size] = aggregate_z_action  # input = z_i + action
+        rnn_output[i: i + batch_size] = rnn_z_input
 
     # z_i -> z_i+1 since output of the model is => z_i+1
     shifted_rnn_output = torch.roll(rnn_output, shifts=1, dims=1)
@@ -38,5 +38,18 @@ def main(vae_latent_shape=32, batch_size=500, vae_weights_path='models/VAE_weigh
     torch.save(trimmed_rnn_input, rnn_input_data_path)
     torch.save(trimmed_rnn_output, rnn_output_data_path)
 
+
+# parameters
+v_path = 'models/VAE_weights.pth'
+action_data_path = './data/action_data_car_racing.pth'
+obs_data_path = './data/obs_data_car_racing.pth'
+rnn_output_data_path = './data/rnn_output.pth'
+rnn_input_data_path = './data/rnn_input.pth'
+vae_latent_size = 32
+RNN_data_gen_batch_size = 256
+
 if __name__ == "__main__":
-    main()
+    main(vae_latent_shape=vae_latent_size, batch_size=RNN_data_gen_batch_size,
+         vae_weights_path=v_path,
+         action_data_path=action_data_path, obs_data_path=obs_data_path,
+         rnn_input_data_path=rnn_input_data_path, rnn_output_data_path=rnn_output_data_path)

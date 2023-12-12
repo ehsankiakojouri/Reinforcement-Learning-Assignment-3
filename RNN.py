@@ -3,11 +3,8 @@ import torch.nn as nn
 import torch.optim as optim
 
 
-
 class RNN(nn.Module):
-    """ MULTI STEPS forward.
-        input: aggregated vector of latents(Z_i + actions)
-        """
+
     def __init__(self, vae_latent_size, hidden_units, action_dim, gaussian_mixtures):
         super(RNN, self).__init__()
         self.hidden_units = hidden_units
@@ -37,6 +34,7 @@ class RNN(nn.Module):
         # mu can be anything
         return pi, mu, sigma
 
+
 def MDN_RNN_loss(y_true, pi, mu, sigma, gaussian_mixtures, latent_size):
     # Reshape mean and std tensors
     mu = mu.view(-1, gaussian_mixtures, latent_size)
@@ -56,18 +54,18 @@ def MDN_RNN_loss(y_true, pi, mu, sigma, gaussian_mixtures, latent_size):
 
 
 # according to the world models paper appendix
-def main(latent_size=32, action_dim=3, hidden_units=256, gaussian_mixtures=5, batch_size=500, epochs=20, rnn_weights_path='./models/rnn_weights.pth', rnn_input_data_path='./data/rnn_input.pth', rnn_output_data_path='./data/rnn_output.pth'):
+def main(latent_size, action_dim, hidden_units, gaussian_mixtures, batch_size, epochs, rnn_weights_path,
+         rnn_input_data_path, rnn_output_data_path):
     rnn = RNN(latent_size, hidden_units, action_dim, gaussian_mixtures)
     optimizer = optim.RMSprop(rnn.parameters())
 
     train_rnn_input = torch.load(rnn_input_data_path)
     train_rnn_output = torch.load(rnn_output_data_path)
 
-
     for epoch in range(epochs):
         for i in range(0, len(train_rnn_output), batch_size):
-            x = train_rnn_input[i:i+batch_size]
-            y = train_rnn_output[i:i+batch_size]
+            x = train_rnn_input[i:i + batch_size]
+            y = train_rnn_output[i:i + batch_size]
             rnn.train()
             optimizer.zero_grad()
             rnn_output, _ = rnn(x)
@@ -80,5 +78,22 @@ def main(latent_size=32, action_dim=3, hidden_units=256, gaussian_mixtures=5, ba
     # Save model weights
     torch.save(rnn.state_dict(), rnn_weights_path)
 
+
+# parameters
+m_path = './models/rnn_weights.pth'
+rnn_output_data_path = './data/rnn_output.pth'
+rnn_input_data_path = './data/rnn_input.pth'
+vae_latent_size = 32
+rnn_hidden_units = 256
+# given by continuous environment is 3
+action_dim = 3
+gaussian_mixtures = 5
+RNN_epochs = 20
+RNN_train_batch_size = 256
+
+
 if __name__ == "__main__":
-    main()
+    main(latent_size=vae_latent_size, action_dim=action_dim, hidden_units=rnn_hidden_units,
+         gaussian_mixtures=gaussian_mixtures,
+         batch_size=RNN_train_batch_size, epochs=RNN_epochs, rnn_weights_path=m_path,
+         rnn_input_data_path=rnn_input_data_path, rnn_output_data_path=rnn_output_data_path)
