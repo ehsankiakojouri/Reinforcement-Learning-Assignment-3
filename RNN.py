@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class RNN(nn.Module):
@@ -8,14 +9,14 @@ class RNN(nn.Module):
     def __init__(self, vae_latent_size, hidden_units, action_dim, gaussian_mixtures):
         super(RNN, self).__init__()
         self.hidden_units = hidden_units
-        self.rnn = nn.LSTM(input_size=vae_latent_size + action_dim, hidden_size=hidden_units)
-        self.fc = nn.Linear(hidden_units, gaussian_mixtures * (3 * vae_latent_size))
+        self.rnn = nn.LSTM(input_size=vae_latent_size + action_dim, hidden_size=hidden_units).to(device)
+        self.fc = nn.Linear(hidden_units, gaussian_mixtures * (3 * vae_latent_size)).to(device)
 
     def forward(self, x, h=None, c=None):
         if h is None:
-            h = torch.zeros(1, self.hidden_units)
+            h = torch.zeros(1, self.hidden_units).to(device)
         if c is None:
-            c = torch.zeros(1, self.hidden_units)
+            c = torch.zeros(1, self.hidden_units).to(device)
         lstm_out, (h, c) = self.rnn(x, (h, c))
         pi, mu, sigma = self.mixture_density_network(lstm_out)
         return (pi, mu, sigma), (h, c)
@@ -56,16 +57,16 @@ def MDN_RNN_loss(y_true, pi, mu, sigma, gaussian_mixtures, latent_size):
 # according to the world models paper appendix
 def main(latent_size, action_dim, hidden_units, gaussian_mixtures, batch_size, epochs, rnn_weights_path,
          rnn_input_data_path, rnn_output_data_path):
-    rnn = RNN(latent_size, hidden_units, action_dim, gaussian_mixtures)
+    rnn = RNN(latent_size, hidden_units, action_dim, gaussian_mixtures).to(device)
     optimizer = optim.RMSprop(rnn.parameters())
 
-    train_rnn_input = torch.load(rnn_input_data_path)
-    train_rnn_output = torch.load(rnn_output_data_path)
+    train_rnn_input = torch.load(rnn_input_data_path).to(device)
+    train_rnn_output = torch.load(rnn_output_data_path).to(device)
 
     for epoch in range(epochs):
         for i in range(0, len(train_rnn_output), batch_size):
-            x = train_rnn_input[i:i + batch_size]
-            y = train_rnn_output[i:i + batch_size]
+            x = train_rnn_input[i:i + batch_size].to(device)
+            y = train_rnn_output[i:i + batch_size].to(device)
             rnn.train()
             optimizer.zero_grad()
             rnn_output, _ = rnn(x)

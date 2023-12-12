@@ -35,7 +35,7 @@ class RolloutGenerator(object):
         self.action_dim = action_dim
         self.vae_latent_size = vae_latent_size
         self.rnn_hidden_units = rnn_hidden_units
-        self.vae = VAE(vae_latent_size).to(device)
+        self.vae = VAE(vae_latent_size, device).to(device)
         checkpoint_v = torch.load(v_path)
         self.vae.load_state_dict(checkpoint_v)
 
@@ -47,7 +47,6 @@ class RolloutGenerator(object):
         render_mode = 'human' if render else 'rgb_array'
         self.env = gym.make('CarRacing-v2', render_mode=render_mode)
         self.device = device if device else 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.ha = 'hss'
 
     def pre_process(self, obs):
         x = cv2.resize(obs, dsize=(64, 64), interpolation=cv2.INTER_NEAREST)
@@ -105,7 +104,7 @@ def main(initial_time_steps, vae_latent_size, best_rollouts, n_rollouts, pop_siz
     cur_best = None
     generation = 0
     best = 0
-    
+
     # dummy controller to initialize parameters
     controller = CONTROLLER(rnn_hidden_units, vae_latent_size, action_dim)
     parameters = controller.parameters()
@@ -150,7 +149,7 @@ def main(initial_time_steps, vae_latent_size, best_rollouts, n_rollouts, pop_siz
 
 
 # parameters
-v_path = 'models/VAE_weights.pth'
+v_path = './models/VAE_weights.pth'
 m_path = './models/rnn_weights.pth'
 c_path = './models/cmaes_train_controller.pth'
 vae_latent_size = 32
