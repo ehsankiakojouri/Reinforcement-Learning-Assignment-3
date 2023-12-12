@@ -11,7 +11,7 @@ class CONTROLLER(nn.Module):
         self.action_dim = action_dim
         self.fc1 = nn.Linear(rnn_hidden_units+vae_latent_size, action_dim, bias=True)
     def get_action(self, z, h):
-        i = torch.cat((z, h.view(1, self.rnn_hidden_units)), 1)
+        i = torch.cat((z, h.view(1, self.rnn_hidden_units)), 1).to(self.fc1.weight.device)
         y = self.fc1(i).view(3)
 
         y = y.tanh()
